@@ -1,0 +1,56 @@
+name: Auto Update Worker
+
+on:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: "0 1 * * *"
+  workflow_dispatch:
+    inputs:
+      force_update:
+        description: '是否强制更新（忽略版本检查）'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: write
+
+jobs:
+  clone:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout 目标仓库（MoneyPrinterTurbo）
+        uses: actions/checkout@v4
+        with:
+          repository: harry0703/MoneyPrinterTurbo
+          path: ./MoneyPrinterTurbo  # 显式指定克隆路径
+          token: ${{ secrets.SYNC_TOKEN }}
+          ref: main  # 强制指定克隆分支
+          fetch-depth: 0  # 获取完整提交历史（确保包含所有文件）
+
+      - name: 调试工作目录结构
+        run: |
+          echo "当前绝对路径: $(pwd)"
+          echo "工作目录内容:"
+          ls -la
+          echo "克隆目录内容:"
+          ls -la ./MoneyPrinterTurbo
+
+      - name: 验证关键文件存在
+        run: |
+          # 替换为实际应存在的文件名（例如 README.md）
+          if [ ! -f "./MoneyPrinterTurbo/README.md" ]; then
+            echo "关键文件缺失！请检查："
+            echo "1. 目标仓库是否包含文件？"
+            echo "2. SYNC_TOKEN 是否有权限？"
+            echo "3. 仓库默认分支是否为 main？"
+            exit 1
+          fi
+          echo "文件验证通过！"
+
+      - name: 显示Git状态
+        run: |
+          cd ./MoneyPrinterTurbo || exit 1
+          git status
+          git log -1
