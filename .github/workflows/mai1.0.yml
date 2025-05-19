@@ -1,0 +1,48 @@
+name: Multi-Trigger Clone
+
+on:
+  push:
+    branches:
+      - main  # 当 main 分支被推送时触发
+  workflow_dispatch:  # 手动触发按钮
+    inputs:
+      clone_depth:
+        description: '克隆深度（0=完整历史）'
+        required: false
+        default: '1'
+  schedule:
+    - cron: '0 2 * * *'  # 每天凌晨2点定时触发
+
+permissions:
+  contents: read  # 仅需读取权限（克隆操作）
+
+jobs:
+  clone_repo:
+    runs-on: ubuntu-latest
+    steps:
+      # 1. 手动触发参数处理
+      - name: 设置克隆深度
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          echo "FETCH_DEPTH=${{ github.event.inputs.clone_depth || 1 }}" >> $GITHUB_ENV
+
+      # 2. 核心克隆操作
+      - name: 克隆指定仓库
+        uses: actions/checkout@v4
+        with:
+          repository: harry0703/MoneyPrinterTurbo  # 目标仓库
+          path: ./cloned-repo  # 自定义工作目录
+          fetch-depth: ${{ env.FETCH_DEPTH || 1 }}  # 默认仅克隆最新提交
+
+      # 3. 验证克隆结果（可选）
+      - name: 显示克隆内容
+        run: |
+          ls -la ./cloned-repo
+          echo "最新提交哈希: $(git -C ./cloned-repo rev-parse HEAD)"
+
+      # 4. 扩展：推送到其他仓库（需配置目标仓库权限）
+      # - name: 推送克隆内容到目标仓库
+      #   run: |
+      #     cd ./cloned-repo
+      #     git remote add target https://${{ secrets.TARGET_TOKEN }}@github.com/YOUR_USERNAME/TARGET_REPO.git
+      #     git push target main --force
