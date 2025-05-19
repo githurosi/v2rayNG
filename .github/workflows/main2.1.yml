@@ -1,16 +1,15 @@
-name: Auto Update MoneyPrinterTurbo
+name: Auto Update with Changelog
 
 on:
   push:
     branches:
       - main
   schedule:
-    - cron: "0 1 * * *"  # 每天凌晨1点运行
+    - cron: "0 1 * * *"
   workflow_dispatch:
     inputs:
       force_update:
-        description: '强制更新（即使版本相同）'
-        required: false
+        description: '强制更新'
         type: boolean
 
 permissions:
@@ -24,29 +23,24 @@ jobs:
       - name: 检出仓库
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # 获取完整历史记录
+          fetch-depth: 0
 
       - name: 设置环境变量
         run: |
           echo "REPO_OWNER=harry0703" >> $GITHUB_ENV
           echo "REPO_NAME=MoneyPrinterTurbo" >> $GITHUB_ENV
-          echo "TARGET_FILE=MoneyPrinterTurbo.zip" >> $GITHUB_ENV  # 根据实际文件名调整
+          echo "TARGET_FILE=MoneyPrinterTurbo.zip" >> $GITHUB_ENV
 
       - name: 检查并更新Assets
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # 日志函数
           log() { echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1"; }
-
           log "开始检查更新..."
 
-          # 获取本地版本
           LOCAL_VERSION=$(cat version.txt 2>/dev/null || echo "0.0.0")
           log "本地版本: ${LOCAL_VERSION}"
 
-          # 获取最新Release
-          log "获取最新Release信息..."
           API_URL="https://api.github.com/repos/${{ env.REPO_OWNER }}/${{ env.REPO_NAME }}/releases/latest"
           RESPONSE=$(curl -s --retry 3 -H "Authorization: token $GITHUB_TOKEN" "$API_URL")
           
@@ -57,54 +51,60 @@ jobs:
 
           TAG_NAME=$(echo "$RESPONSE" | jq -r '.tag_name')
           DOWNLOAD_URL=$(echo "$RESPONSE" | jq -r ".assets[] | select(.name == \"${{ env.TARGET_FILE }}\") | .browser_download_url")
+          CHANGELOG=$(echo "$RESPONSE" | jq -r '.body' | sed 's/"/\\"/g')  # 转义双引号
 
           if [ -z "$DOWNLOAD_URL" ]; then
             log "ERROR: 未找到 ${{ env.TARGET_FILE }}"
             exit 1
           fi
-          log "最新版本: $TAG_NAME"
 
-          # 版本比较
           if [ "$LOCAL_VERSION" = "$TAG_NAME" ] && [ "${{ github.event.inputs.force_update }}" != "true" ]; then
-            log "已是最新版本，无需更新"
-            exit 0
+            log "检测到版本无变化，准备更新日志"
+            UPDATE_LOG="true"
+          else
+            log "发现新版本: $TAG_NAME"
+            UPDATE_LOG="false"
+            
+            wget -q --show-progress -O "${{ env.TARGET_FILE }}" "$DOWNLOAD_URL"
+            case "${{ env.TARGET_FILE }}" in
+              *.zip) unzip -o "${{ env.TARGET_FILE }}" ;;
+              *.tar.gz) tar -xzvf "${{ env.TARGET_FILE }}" ;;
+            esac
+            rm -rf "${{ env.TARGET_FILE }}" __MACOSX
+            mv MoneyPrinterTurbo/* .
+            rm -rf MoneyPrinterTurbo
+            echo "$TAG_NAME" > version.txt
           fi
 
-          # 下载并更新
-          log "下载 ${{ env.TARGET_FILE }}..."
-          wget -q --show-progress -O "${{ env.TARGET_FILE }}" "$DOWNLOAD_URL"
-          
-          # 解压文件（根据实际压缩格式调整）
-          case "${{ env.TARGET_FILE }}" in
-            *.zip)
-              unzip -o "${{ env.TARGET_FILE }}"
-              ;;
-            *.tar.gz)
-              tar -xzvf "${{ env.TARGET_FILE }}"
-              ;;
-            *)
-              log "未知压缩格式: ${{ env.TARGET_FILE }}"
-              exit 1
-          esac
-
-          # 清理旧文件
-          find . -maxdepth 1 ! -name '*.md' ! -name 'LICENSE' ! -name '.git' ! -name 'version.txt' -exec rm -rf {} \;
-
-          # 移动解压内容
-          mv MoneyPrinterTurbo/* .  # 根据实际目录结构调整
-          rm -rf MoneyPrinterTurbo
-
-          # 更新版本文件
-          echo "$TAG_NAME" > version.txt
-          log "更新完成，新版本: $TAG_NAME"
+          # 更新主页日志
+          if [ "$UPDATE_LOG" = "true" ] || [ "${{ github.event.inputs.force_update }}" = "true" ]; then
+            log "更新主页版本日志..."
+            echo "<!-- VERSION_LOG -->" > changelog.md
+            echo "$CHANGELOG" >> changelog.md
+            
+            # 更新README头部
+            awk -v cl="$CHANGELOG" '
+              /<!-- VERSION_START -->/,/<!-- VERSION_END -->/ {
+                if ($0 == "<!-- VERSION_START -->") print;
+                else if ($0 == "<!-- VERSION_END -->") print;
+                else next;
+              }
+              { print }
+              END {
+                print "<!-- VERSION_START -->"
+                print cl
+                print "<!-- VERSION_END -->"
+              }' README.md > README.md.tmp && mv README.md.tmp README.md
+          fi
 
       - name: 提交更改
         if: success()
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "🔄 自动同步MoneyPrinterTurbo版本: ${{ env.TAG_NAME }}"
+          commit_message: "🔄 ${{ env.UPDATE_LOG && '更新版本日志' || '同步新版本' }}: ${{ env.TAG_NAME || '未知' }}"
           commit_author: "github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
           branch: main
+          file_pattern: "version.txt changelog.md README.md"
 
       - name: 失败通知
         if: ${{ failure() }}
@@ -112,7 +112,7 @@ jobs:
         with:
           title: "更新失败警报 ⚠️"
           body: |
-            自动更新MoneyPrinterTurbo失败，请检查：
+            自动更新失败，请检查：
             1. 网络连接
             2. 仓库权限
             3. Release资产完整性
