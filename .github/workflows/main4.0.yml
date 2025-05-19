@@ -1,0 +1,33 @@
+name: Auto Update Worker
+
+on:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: "0 1 * * *" # 每天凌晨1点运行
+  workflow_dispatch:
+    inputs:
+      force_update:
+        description: '是否强制更新（忽略版本检查）'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: write
+
+jobs:
+  clone:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout 目标仓库（MoneyPrinterTurbo）
+        uses: actions/checkout@v4
+        with:
+          repository: harry0703/MoneyPrinterTurbo  # 目标仓库地址
+          path: ./MoneyPrinterTurbo  # 克隆到当前目录下的 MoneyPrinterTurbo 文件夹
+          token: ${{ secrets.YOUR_TOKEN }}  # 如果仓库是私有的，需要提供访问令牌
+ 
+      - name: 验证克隆结果
+        run: |
+          ls -la ./MoneyPrinterTurbo
+          echo "克隆完成！"
