@@ -1,0 +1,46 @@
+name: Auto Update Worker
+
+on:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: "0 1 * * *"
+  workflow_dispatch:
+    inputs:
+      force_update:
+        description: '是否强制更新（忽略版本检查）'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: write
+
+jobs:
+  clone:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 初始化调试环境
+        run: |
+          echo "系统信息:"
+          cat /etc/os-release
+          df -h  # 显示磁盘空间
+          free -h  # 显示内存状态
+
+      - name: 执行克隆操作（带详细日志）
+        uses: actions/checkout@v4
+        with:
+          repository: harry0703/MoneyPrinterTurbo
+          path: ./MoneyPrinterTurbo
+          token: ${{ secrets.SYNC_TOKEN }}
+          ref: main
+          fetch-depth: 0
+          lfs: true
+          persist-credentials: false
+          submodules: recursive
+
+      - name: 收集系统日志
+        if: ${{ always() }}
+        run: |
+          journalctl -u github-actions --since "5 minutes ago"
+          dmesg | tail -n 50
