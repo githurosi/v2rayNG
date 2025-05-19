@@ -1,0 +1,96 @@
+name: Robust v2rayNG Beta Sync
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'  # 每6小时尝试一次
+  workflow_dispatch:
+    inputs:
+      retry_count:
+        description: '重试次数'
+        required: false
+        default: '3'
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  sync-beta:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15  # 增加超时限制
+    steps:
+    - name: Initial Setup
+      run: |
+        echo "::group::系统信息"
+        echo "GitHub Actor: ${{ github.actor }}"
+        echo "Runner OS: ${{ runner.os }}"
+        echo "::endgroup::"
+
+    - name: Checkout Target Repo
+      uses: actions/checkout@v4
+      with:
+        path: target
+        token: ${{ secrets.SYNC_TOKEN }}
+        fetch-depth: 0
+        persist-credentials: false
+
+    - name: Checkout Source Repo
+      uses: actions/checkout@v4
+      with:
+        repository: 2dust/v2rayNG
+        ref: beta
+        path: source
+        token: ${{ secrets.SYNC_TOKEN }}
+        fetch-depth: 0
+        persist-credentials: false
+
+    - name: Network Diagnostics
+      run: |
+        echo "::group::网络诊断"
+        curl -v https://github.com 2>&1 | grep 'HTTP/'
+        ping -c 4 github.com
+        echo "::endgroup::"
+
+    - name: Git Configuration
+      run: |
+        git config --global --add safe.directory /github/workspace/target
+        git config --global --add safe.directory /github/workspace/source
+        git config --global credential.helper 'store --file ~/.git-credentials'
+        echo "https://${{ github.actor }}:${{ secrets.SYNC_TOKEN }}@github.com" > ~/.git-credentials
+
+    - name: Sync with Retry
+      run: |
+        RETRY_COUNT=${{ github.event.inputs.retry_count || 3 }}
+        for i in $(seq 1 $RETRY_COUNT); do
+          echo "尝试同步 ($i/$RETRY_COUNT)..."
+          cd target && \
+          git remote add upstream ../source/.git && \
+          git fetch upstream && \
+          git checkout -B beta upstream/beta && \
+          git push --force origin beta && \
+          break || \
+          (echo "同步失败，等待重试..."; sleep $((i*10))); 
+        done
+
+    - name: Post-Sync Validation
+      if: ${{ always() }}
+      run: |
+        echo "::group::同步后验证"
+        cd target
+        echo "最新提交: $(git log -1 --pretty=%B)"
+        echo "分支状态: $(git status)"
+        echo "::endgroup::"
+
+    - name: Issue Notification
+      if: ${{ failure() }}
+      uses: imjohnbo/issue-bot@v3
+      with:
+        title: "同步失败警报 ⚠️"
+        body: |
+          自动同步beta版本失败，请检查：
+          1. 网络连接
+          2. 仓库权限
+          3. 分支状态
+          最新日志：${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        assignees: ${{ github.actor }}
+        labels: "sync-failed"
