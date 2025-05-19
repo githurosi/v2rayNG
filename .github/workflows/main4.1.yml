@@ -25,7 +25,7 @@ jobs:
         with:
           repository: harry0703/MoneyPrinterTurbo  # 目标仓库地址
           path: ./MoneyPrinterTurbo  # 克隆到当前目录下的 MoneyPrinterTurbo 文件夹
-          token: ${{ secrets.YOUR_TOKEN }}  # 如果仓库是私有的，需要提供访问令牌
+          token: ${{ secrets.SYNC_TOKEN }}  # 如果仓库是私有的，需要提供访问令牌
  
       - name: 验证克隆结果
         run: |
