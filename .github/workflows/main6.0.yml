@@ -1,0 +1,46 @@
+name: Full Clone Worker
+
+on:
+  workflow_dispatch:  # 手动触发
+
+permissions:
+  contents: read  # 仅需读取权限
+
+jobs:
+  full_clone:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 完整克隆仓库（含全部历史）
+        uses: actions/checkout@v4
+        with:
+          repository: harry0703/MoneyPrinterTurbo
+          path: ./full_clone
+          token: ${{ secrets.SYNC_TOKEN }}  # 私有仓库需填写
+          fetch-depth: 0  # 关键参数：获取完整提交历史
+          submodules: recursive  # 递归克隆子模块
+
+      - name: 验证克隆完整性
+        run: |
+          cd ./full_clone || exit 1
+          
+          # 基础验证
+          echo "总提交数: $(git rev-list --all | wc -l)"
+          echo "最新提交: $(git log -1 --pretty=%B)"
+          echo "分支列表: $(git branch -a)"
+          
+          # 文件验证（替换为实际文件名）
+          test -f "README.md" || exit 1
+          test -d "src" || exit 1
+
+      - name: 收集Git日志
+        run: |
+          cd ./full_clone || exit 1
+          git log --oneline --graph --all > ./full_git_log.txt
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v3
+        with:
+          name: cloned_repository
+          path: |
+            ./full_clone/
+            ./full_git_log.txt
