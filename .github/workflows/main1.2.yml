@@ -1,0 +1,89 @@
+name: Smart v2rayNG Version Sync
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'  # 每6小时检测一次
+  workflow_dispatch:
+    inputs:
+      target_branch:
+        description: '目标分支'
+        required: false
+        default: 'beta'
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  sync-beta:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+    - name: Validate Source Branch
+      run: |
+        echo "检测源仓库是否存在beta分支..."
+        if ! curl -s -H "Accept: application/vnd.github.v3+json" \
+          https://api.github.com/repos/2dust/v2rayNG/branches/beta | jq -e '.name' >/dev/null; then
+          echo "错误：源仓库不存在beta分支！"
+          exit 1
+        fi
+
+    - name: Checkout Target Repo
+      uses: actions/checkout@v4
+      with:
+        path: target
+        token: ${{ secrets.SYNC_TOKEN }}
+        fetch-depth: 0
+        persist-credentials: false
+
+    - name: Checkout Source Repo
+      uses: actions/checkout@v4
+      with:
+        repository: 2dust/v2rayNG
+        ref: beta
+        path: source
+        token: ${{ secrets.SYNC_TOKEN }}
+        fetch-depth: 0
+        persist-credentials: false
+
+    - name: Version Comparison
+      id: version_check
+      run: |
+        cd source
+        LATEST_COMMIT=$(git rev-parse HEAD)
+        cd ../target
+        CURRENT_COMMIT=$(git rev-parse beta 2>/dev/null || echo "NOT_FOUND")
+        
+        echo "latest_commit=$LATEST_COMMIT" >> $GITHUB_OUTPUT
+        echo "current_commit=$CURRENT_COMMIT" >> $GITHUB_OUTPUT
+        echo "需要同步: $([[ "$CURRENT_COMMIT" != "$LATEST_COMMIT" ]] && echo '是' || echo '否')"
+
+    - name: Conditional Sync
+      if: ${{ steps.version_check.outputs.current_commit != steps.version_check.outputs.latest_commit }}
+      run: |
+        cd target
+        git remote add upstream ../source/.git
+        git fetch upstream
+        git checkout -B beta upstream/beta
+        git push --force origin beta
+
+    - name: Sync Notification
+      if: ${{ always() }}
+      uses: rjstone/discord-webhook-notify@v1
+      with:
+        severity: ${{ job.status }}
+        description: ${{ format('源仓库提交: {0} → 目标仓库提交: {1}', steps.version_check.outputs.latest_commit, steps.version_check.outputs.current_commit) }}
+        webhookUrl: ${{ secrets.DISCORD_WEBHOOK }}
+
+    - name: Issue Alert
+      if: ${{ failure() && github.event_name != 'schedule' }}
+      uses: imjohnbo/issue-bot@v3
+      with:
+        title: "同步失败警报 ⚠️"
+        body: |
+          自动同步失败，关键信息：
+          - 源提交: ${{ steps.version_check.outputs.latest_commit }}
+          - 目标提交: ${{ steps.version_check.outputs.current_commit }}
+          - 错误日志: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        assignees: ${{ github.actor }}
+        labels: "sync-failed,bug"
