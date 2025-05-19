@@ -1,0 +1,122 @@
+name: Auto Update with Forced Changelog
+
+on:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: "0 1 * * *"
+  workflow_dispatch:
+    inputs:
+      force_update:
+        description: '强制更新模式'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 设置环境变量
+        run: |
+          echo "REPO_OWNER=harry0703" >> $GITHUB_ENV
+          echo "REPO_NAME=MoneyPrinterTurbo" >> $GITHUB_ENV
+          echo "TARGET_FILE=MoneyPrinterTurbo.zip" >> $GITHUB_ENV
+
+      - name: 获取Release信息
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          log() { echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1"; }
+          log "开始获取Release信息..."
+
+          API_URL="https://api.github.com/repos/${{ env.REPO_OWNER }}/${{ env.REPO_NAME }}/releases/latest"
+          RESPONSE=$(curl -s --retry 3 -H "Authorization: token $GITHUB_TOKEN" "$API_URL")
+          
+          if [ $? -ne 0 ]; then
+            log "ERROR: 无法访问GitHub API"
+            exit 1
+          fi
+
+          echo "TAG_NAME=$(echo "$RESPONSE" | jq -r '.tag_name')" >> $GITHUB_ENV
+          echo "CHANGELOG=$(echo "$RESPONSE" | jq -r '.body' | sed 's/"/\\"/g')" >> $GITHUB_ENV
+          echo "DOWNLOAD_URL=$(echo "$RESPONSE" | jq -r ".assets[] | select(.name == \"${{ env.TARGET_FILE }}\") | .browser_download_url")" >> $GITHUB_ENV
+
+      - name: 条件更新Assets
+        if: ${{ env.DOWNLOAD_URL != 'null' && env.DOWNLOAD_URL != '' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          log() { echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1"; }
+          log "开始更新Assets..."
+
+          LOCAL_VERSION=$(cat version.txt 2>/dev/null || echo "0.0.0")
+          if [ "$LOCAL_VERSION" = "${{ env.TAG_NAME }}" ] && [ "${{ github.event.inputs.force_update }}" != "true" ]; then
+            log "已是最新版本，跳过文件更新"
+            exit 0
+          fi
+
+          wget -q --show-progress -O "${{ env.TARGET_FILE }}" "${{ env.DOWNLOAD_URL }}" || true
+          case "${{ env.TARGET_FILE }}" in
+            *.zip) unzip -o "${{ env.TARGET_FILE }}" 2>/dev/null || true ;;
+            *.tar.gz) tar -xzvf "${{ env.TARGET_FILE }}" 2>/dev/null || true ;;
+          esac
+          rm -f "${{ env.TARGET_FILE }}" __MACOSX 2>/dev/null || true
+          mv MoneyPrinterTurbo/* . 2>/dev/null || true
+          rm -rf MoneyPrinterTurbo 2>/dev/null || true
+          echo "${{ env.TAG_NAME }}" > version.txt
+
+      - name: 强制更新日志
+        run: |
+          log() { echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1"; }
+          log "更新版本日志..."
+
+          # 创建或覆盖changelog.md
+          echo "<!-- VERSION_LOG -->" > changelog.md
+          echo "${{ env.CHANGELOG }}" >> changelog.md
+
+          # 更新README头部
+          awk -v cl="${{ env.CHANGELOG }}" '
+            /<!-- VERSION_START -->/,/<!-- VERSION_END -->/ {
+              if ($0 == "<!-- VERSION_START -->") print;
+              else if ($0 == "<!-- VERSION_END -->") print;
+              else next;
+            }
+            { print }
+            END {
+              print "<!-- VERSION_START -->"
+              print cl
+              print "<!-- VERSION_END -->"
+            }' README.md > README.md.tmp && mv README.md.tmp README.md
+
+      - name: 提交更改
+        if: success()
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "🔄 ${{ github.event.inputs.force_update && '强制更新' || '自动更新' }}: 版本日志同步至 ${{ env.TAG_NAME }}"
+          commit_author: "github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
+          branch: main
+          file_pattern: "version.txt changelog.md README.md"
+
+      - name: 失败通知
+        if: ${{ failure() }}
+        uses: imjohnbo/issue-bot@v3
+        with:
+          title: "更新失败警报 ⚠️"
+          body: |
+            自动更新失败，请检查：
+            1. 网络连接
+            2. 仓库权限
+            3. Release资产完整性
+            最新日志：${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          assignees: ${{ github.actor }}
+          labels: "update-failed,bug"
