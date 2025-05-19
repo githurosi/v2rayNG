@@ -1,0 +1,71 @@
+name: Sync v2rayNG Beta Version
+
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+    inputs:
+      force_sync:
+        description: '强制同步最新版本'
+        required: false
+        type: boolean
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync-beta:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Validate Environment
+      run: |
+        echo "Checking required secrets..."
+        [[ -n "${{ secrets.SYNC_TOKEN }}" ]] || { echo "SYNC_TOKEN未配置"; exit 1; }
+        echo "环境验证通过"
+
+    - name: Checkout Target Repo
+      uses: actions/checkout@v4
+      with:
+        path: target
+        token: ${{ secrets.SYNC_TOKEN }}
+        fetch-depth: 0  # 获取完整历史记录
+
+    - name: Checkout Source Repo
+      uses: actions/checkout@v4
+      with:
+        repository: 2dust/v2rayNG
+        ref: beta
+        path: source
+        token: ${{ secrets.SYNC_TOKEN }}
+        fetch-depth: 0
+
+    - name: Configure Git Identity
+      run: |
+        git config --global user.name "github-actions"
+        git config --global user.email "github-actions@users.noreply.github.com"
+        git config --global credential.helper '!f() { echo "username=<your_bot_username>"; echo "password=${{ secrets.SYNC_TOKEN }}"; }; f'
+
+    - name: Sync Branches
+      run: |
+        cd target
+        git remote add upstream ../source/.git
+        git fetch upstream
+        git checkout -B beta upstream/beta || {
+          echo "分支创建失败，尝试强制推送"
+          git push --force origin beta
+          git checkout -B beta origin/beta
+        }
+        git push --force origin beta
+
+    - name: Create Sync PR
+      if: ${{ github.event_name == 'workflow_dispatch' }}
+      run: |
+        cd target
+        git checkout -b sync-beta-$(date +%Y%m%d)
+        git add .
+        git commit -m "chore: 同步最新beta版本" || exit 0
+        git push origin sync-beta-$(date +%Y%m%d)
+        gh pr create --title "同步beta版本" --body "自动同步最新beta版本" --base beta --head sync-beta-$(date +%Y%m%d)
+      env:
+        GITHUB_TOKEN: ${{ secrets.SYNC_TOKEN }}
