@@ -3,7 +3,7 @@ on:
   push:
     branches: [ main ]
   schedule:
-    - cron: "0 1 * * *"# 每天凌晨1点运行 (UTC+8)
+    - cron: "0 1 * * *"  # 每天凌晨1点运行 (UTC+8)
   workflow_dispatch:
     inputs:
       force_update:
@@ -17,82 +17,99 @@ permissions:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: 检出仓库
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
-      - name: 创建版本文件夹
-        id: create-folder
+      # 获取最新稳定版
+      - name: 获取最新版本信息
+        id: latest-release
         run: |
-          # 获取动态版本号
-          REPO_OWNER="2dust"
-          REPO_NAME="v2rayNG"
-          response=$(curl -s https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest)
-          TAG_NAME=$(echo "$response" | jq -r '.tag_name')
-          
-          # 创建目录结构
-          mkdir -p "最新版本/${TAG_NAME}"
-          echo "✅ 创建文件夹: 最新版本/${TAG_NAME}"
-          
-          # 输出变量供后续步骤使用
-          echo "ASSETS_DIR=最新版本/${TAG_NAME}" >> $GITHUB_ENV
+          response=$(curl -s https://api.github.com/repos/2dust/v2rayNG/releases/latest)
+          echo "TAG_NAME=$(echo "$response" | jq -r '.tag_name')" >> $GITHUB_OUTPUT
+          echo "LATEST_ASSETS=$(echo "$response" | jq -r '.assets[].name')" >> $GITHUB_OUTPUT
 
-      - name: 下载最新资产
-        id: download-assets
+      # 创建最新版本目录
+      - name: 创建最新版本目录
+        run: |
+          mkdir -p "最新版本/${{ steps.latest-release.outputs.TAG_NAME }}"
+          echo "✅ 创建最新版本文件夹: 最新版本/${{ steps.latest-release.outputs.TAG_NAME }}"
+
+      # 下载最新版本资产
+      - name: 下载最新版本资产
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -euo pipefail
-          REPO_OWNER="2dust"
-          REPO_NAME="v2rayNG"
-          
-          response=$(curl -s https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest)
-          TAG_NAME=$(echo "$response" | jq -r '.tag_name')
-          ASSETS=($(echo "$response" | jq -r '.assets[].name'))
-
-          for asset in "${ASSETS[@]}"; do
-            DOWNLOAD_URL=$(echo "$response" | jq -r ".assets[] | select(.name == \"$asset\") | .browser_download_url")
-            # 下载到版本文件夹
-            wget -q --show-progress "$DOWNLOAD_URL" -P "${{ env.ASSETS_DIR }}"
-            echo "已保存到: ${{ env.ASSETS_DIR }}/$asset"
+          for asset in ${{ steps.latest-release.outputs.LATEST_ASSETS }};
+          do
+            DOWNLOAD_URL=$(curl -s https://api.github.com/repos/2dust/v2rayNG/releases/latest \
+              | jq -r ".assets[] | select(.name == \"$asset\") | .browser_download_url")
+            wget -q --show-progress "$DOWNLOAD_URL" -P "最新版本/${{ steps.latest-release.outputs.TAG_NAME }}"
           done
 
-          echo "TAG_NAME=$TAG_NAME" >> $GITHUB_OUTPUT
-          echo "ASSETS=$(echo ${ASSETS[*]})" >> $GITHUB_OUTPUT
+      # 获取预发布版本
+      - name: 获取预发布版本信息
+        id: pre-release
+        run: |
+          response=$(curl -s https://api.github.com/repos/2dust/v2rayNG/releases?per_page=100)
+          PRE_TAG_NAME=$(echo "$response" | jq -r '.[] | select(.prerelease == true) | .tag_name' | head -n 1)
+          if [ ! -z "$PRE_TAG_NAME" ]; then
+            echo "PRE_TAG_NAME=$PRE_TAG_NAME" >> $GITHUB_OUTPUT
+            echo "PRE_ASSETS=$(echo "$response" | jq -r --arg tag "$PRE_TAG_NAME" '.[] | select(.tag_name == $tag) | .assets[].name')" >> $GITHUB_OUTPUT
+          fi
 
+      # 创建预发布目录
+      - name: 创建预发布目录
+        if: steps.pre-release.outputs.PRE_TAG_NAME != ''
+        run: |
+          mkdir -p "预发布/${{ steps.pre-release.outputs.PRE_TAG_NAME }}"
+          echo "✅ 创建预发布文件夹: 预发布/${{ steps.pre-release.outputs.PRE_TAG_NAME }}"
+
+      # 下载预发布版本资产
+      - name: 下载预发布版本资产
+        if: steps.pre-release.outputs.PRE_TAG_NAME != ''
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for asset in ${{ steps.pre-release.outputs.PRE_ASSETS }};
+          do
+            DOWNLOAD_URL=$(curl -s https://api.github.com/repos/2dust/v2rayNG/releases/latest \
+              | jq -r --arg tag "${{ steps.pre-release.outputs.PRE_TAG_NAME }}" \
+              '.[] | select(.tag_name == $tag) | .assets[] | select(.name == \"$asset\") | .browser_download_url')
+            wget -q --show-progress "$DOWNLOAD_URL" -P "预发布/${{ steps.pre-release.outputs.PRE_TAG_NAME }}"
+          done
+
+      # 同步更新日志
       - name: 同步更新日志
         id: update-log
         run: |
-          set -euo pipefail
           FORCE_UPDATE=${{ github.event.inputs.force_update || 'false' }}
           LOCAL_VERSION=$(cat version.txt 2>/dev/null || echo "")
-          REPO_OWNER="2dust"
-          REPO_NAME="v2rayNG"
+          LATEST_TAG=$(curl -s https://api.github.com/repos/2dust/v2rayNG/releases/latest | jq -r '.tag_name')
 
-          response=$(curl -s https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest)
-          TAG_NAME=$(echo "$response" | jq -r '.tag_name')
-          RELEASE_NOTES=$(echo "$response" | jq -r '.body')
-
-          if [ "$LOCAL_VERSION" = "$TAG_NAME" ] && [ "$FORCE_UPDATE" != "true" ]; then
-            echo "✅ 已是最新版本（$TAG_NAME），无需更新"
+          if [ "$LOCAL_VERSION" = "$LATEST_TAG" ] && [ "$FORCE_UPDATE" != "true" ]; then
+            echo "✅ 已是最新版本（$LATEST_TAG），无需更新"
             exit 0
           fi
 
-          TRANSLATED_NOTES=$(echo "$RELEASE_NOTES" | trans -b -e google -t zh-CN || echo "$RELEASE_NOTES")
-          echo "$TAG_NAME" > version.txt
-          echo -e "## 📅 更新日志\n### $TAG_NAME\n$TRANSLATED_NOTES" >> README.md
+          TRANSLATED_NOTES=$(curl -s https://api.github.com/repos/2dust/v2rayNG/releases/latest | jq -r '.body' | trans -b -e google -t zh-CN || echo "$(curl -s https://api.github.com/repos/2dust/v2rayNG/releases/latest | jq -r '.body')")
+          echo "$LATEST_TAG" > version.txt
+          echo -e "## 📅 更新日志\n### $LATEST_TAG\n$TRANSLATED_NOTES" >> README.md
 
+      # 提交所有文件
       - name: 提交所有文件
         if: always()
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: |
-            🔄 同步 ${TAG_NAME} 资产与日志
-            资产目录: ${{ env.ASSETS_DIR }}
+            🔄 同步资产与更新日志
+            最新版本: ${{ steps.latest-release.outputs.TAG_NAME }}
+            预发布版本: ${{ steps.pre-release.outputs.PRE_TAG_NAME || '无' }}
           files: |
-            最新版本/**  # 匹配所有版本文件夹
+            最新版本/** 
+            预发布/**
             version.txt
             README.md
