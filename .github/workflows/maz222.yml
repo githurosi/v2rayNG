@@ -99,7 +99,7 @@ jobs:
           echo "$LATEST_TAG" > version.txt
           echo -e "## 📅 更新日志\n### $LATEST_TAG\n$TRANSLATED_NOTES" >> README.md
 
-      # 提交所有文件
+      # 提交所有文件（已修复）
       - name: 提交所有文件
         if: always()
         uses: stefanzweifel/git-auto-commit-action@v5
@@ -108,8 +108,9 @@ jobs:
             🔄 同步资产与更新日志
             最新版本: ${{ steps.latest-release.outputs.TAG_NAME }}
             预发布版本: ${{ steps.pre-release.outputs.PRE_TAG_NAME || '无' }}
-          files: |
-            最新版本/** 
+          # 使用 file_pattern 替换无效的 files 参数
+          file_pattern: |
+            最新版本/**
             预发布/**
             version.txt
             README.md
