@@ -3,7 +3,7 @@ on:
   push:
     branches: [ main ]
   schedule:
-    - cron: "0 1 * * *"  # 每天凌晨1点运行 (UTC+8)
+    - cron: "0 1 * * *"# 每天凌晨1点运行 (UTC+8)
   workflow_dispatch:
     inputs:
       force_update:
@@ -34,11 +34,11 @@ jobs:
           TAG_NAME=$(echo "$response" | jq -r '.tag_name')
           
           # 创建目录结构
-          mkdir -p "assets/${TAG_NAME}"
-          echo "✅ 创建文件夹: assets/${TAG_NAME}"
+          mkdir -p "最新版本/${TAG_NAME}"
+          echo "✅ 创建文件夹: 最新版本/${TAG_NAME}"
           
           # 输出变量供后续步骤使用
-          echo "ASSETS_DIR=assets/${TAG_NAME}" >> $GITHUB_ENV
+          echo "ASSETS_DIR=最新版本/${TAG_NAME}" >> $GITHUB_ENV
 
       - name: 下载最新资产
         id: download-assets
@@ -93,6 +93,6 @@ jobs:
             🔄 同步 ${TAG_NAME} 资产与日志
             资产目录: ${{ env.ASSETS_DIR }}
           files: |
-            assets/**  # 匹配所有版本文件夹
+            最新版本/**  # 匹配所有版本文件夹
             version.txt
             README.md
