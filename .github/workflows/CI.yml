@@ -1,34 +1,31 @@
-name: CI
+name: Sync v2rayNG
 on:
   schedule:
-    - cron: '0 14 * * *'  # 保持原有定时触发
+    - cron: '0 14 * * *'
   workflow_dispatch:
 
 jobs:
-  process-v2rayng-logs:
+  process-logs:
     runs-on: ubuntu-latest
-    
     steps:
-    - name: Checkout current repo
-      uses: actions/checkout@v4
+      - name: Clone v2rayNG (仅最新提交)
+        uses: actions/checkout@v4
+        with:
+          repository: 2dust/v2rayNG
+          path: v2rayNG
+          fetch-depth: 1  # 仅拉取最新提交
 
-    - name: Clone v2rayNG
-      run: |
-        git clone --depth 1 https://github.com/2dust/v2rayNG.git
-        cd v2rayNG
-        git log --pretty=format:"%h|%an|%ad|%s" > ../commits.log
-      working-directory: ${{ github.workspace }}
+      - name: Analyze Commits
+        run: |
+          cd v2rayNG
+          git log --pretty=format:"%h|%an|%ad|%s" > commits.log
+          python ../scripts/process_logs.py  # 确保脚本路径正确
+        working-directory: ${{ github.workspace }}
 
-    - name: Process Logs
-      run: |
-        python scripts/process_v2rayng_logs.py
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: Commit Changes
-      uses: stefanzweifel/git-auto-commit-action@v5
-      with:
-        commit_message: "更新v2rayNG日志分析"
-        file_pattern: |
-          README.md
-          logs/v2rayng_commits.json
+      - name: Commit Changes
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "更新v2rayNG日志分析"
+          file_pattern: |
+            v2rayNG/commits.log
+            logs/*
