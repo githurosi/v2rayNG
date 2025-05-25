@@ -1,25 +1,34 @@
-name: Clone v2rayNG
+name: Clone v2rayNG (Secure Token)
 on:
-  workflow_dispatch:  # 允许手动触发
+  workflow_dispatch:  # 支持手动触发
   schedule:
-    - cron: '0 14 * * *'  # 可选定时触发
+    - cron: '0 14 * * *'  # 每天 UTC 14:00 自动运行
 
 jobs:
   clone-repo:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest  # 默认使用 Ubuntu，若需 macOS 可改为 `macos-latest`
     steps:
-      - name: 清理工作区
-        run: rm -rf v2rayNG  # 避免残留文件冲突
+      # 1. 清理工作区
+      - name: Clean workspace
+        run: |
+          rm -rf v2rayNG  # 强制删除残留目录
+          echo "工作区已清理"
 
-      - name: 克隆 v2rayNG (master分支)
+      # 2. 使用令牌克隆仓库（master/main 分支）
+      - name: Clone v2rayNG with Token
         uses: actions/checkout@v4
         with:
-          repository: 2dust/v2rayNG
+          repository: 2dust/v2rayNG  # 目标仓库
+          token: ${{ secrets.ACCESS_TOKEN }}  # 从 Secrets 读取令牌
           path: v2rayNG  # 指定克隆到独立目录
-          ref: master    # 明确指定分支
-          fetch-depth: 1 # 仅克隆最新提交
+          ref: master  # 分支名称（根据仓库实际分支修改为 master/main）
+          fetch-depth: 1  # 仅克隆最新提交
 
-      - name: 验证克隆结果
+      # 3. 验证克隆结果
+      - name: Verify Cloned Files
         run: |
-          echo "仓库目录结构："
-          ls -al v2rayNG  # 输出克隆后的目录内容
+          echo "克隆目录结构："
+          ls -al v2rayNG  # 列出克隆目录内容
+          echo "核心文件检查："
+          [ -f "v2rayNG/README.md" ] && echo "README.md 存在" || echo "错误：README.md 未找到"
+          [ -d "v2rayNG/src" ] && echo "src 目录存在" || echo "警告：src 目录不存在"
