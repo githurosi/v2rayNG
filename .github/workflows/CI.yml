@@ -1,48 +1,25 @@
-name: Sync v2rayNG
+name: Clone v2rayNG
 on:
+  workflow_dispatch:  # 允许手动触发
   schedule:
-    - cron: '0 14 * * *'
-  workflow_dispatch:
+    - cron: '0 14 * * *'  # 可选定时触发
 
 jobs:
-  process-logs:
+  clone-repo:
     runs-on: ubuntu-latest
     steps:
-      - name: Clean workspace
-        run: rm -rf ./target-repo
+      - name: 清理工作区
+        run: rm -rf v2rayNG  # 避免残留文件冲突
 
-      - name: Clone v2rayNG (master分支)
+      - name: 克隆 v2rayNG (master分支)
         uses: actions/checkout@v4
         with:
           repository: 2dust/v2rayNG
-          path: target-repo
-          fetch-depth: 1
-          ref: master  # 确保分支正确
+          path: v2rayNG  # 指定克隆到独立目录
+          ref: master    # 明确指定分支
+          fetch-depth: 1 # 仅克隆最新提交
 
-      - name: Debug Directory Structure
+      - name: 验证克隆结果
         run: |
           echo "仓库目录结构："
-          ls -R target-repo  # 输出完整目录结构
-
-      - name: Verify Script Exists
-        run: |
-          if [ -f "target-repo/scripts/process_logs.py" ]; then
-            echo "脚本存在！"
-          else
-            echo "错误：脚本不存在于 target-repo/scripts/"
-            exit 1
-          fi
-
-      - name: Analyze Commits
-        run: |
-          cd target-repo
-          git log --pretty=format:"%h|%an|%ad|%s" > commits.log
-          python scripts/process_logs.py
-
-      - name: Commit Changes
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "更新v2rayNG日志分析"
-          file_pattern: |
-            target-repo/commits.log
-            logs/*
+          ls -al v2rayNG  # 输出克隆后的目录内容
